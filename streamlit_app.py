@@ -3,7 +3,7 @@ import os
 import streamlit as st
 
 from titlegene import config
-from titlegene.services.llm_service import LLMAPIError, LLMService
+from titlegene.services.llm_service import GeminiAPIError, GeminiService
 from titlegene.services.session_store import LoopLimitError, SessionStore
 
 
@@ -12,7 +12,7 @@ st.set_page_config(page_title="TitleGen", page_icon="✨", layout="centered")
 
 def load_cloud_secrets() -> None:
     """Expose Streamlit Cloud secrets through the same env-based config API."""
-    for name in ("LLM_PROVIDER", "LLM_MODEL", "LLM_API_KEY", "GEMINI_API_KEY", "MAX_TOKENS"):
+    for name in ("GEMINI_API_KEY", "GEMINI_MODEL", "LLM_MODEL", "MAX_TOKENS"):
         try:
             if name in st.secrets:
                 os.environ[name] = str(st.secrets[name])
@@ -26,7 +26,7 @@ def initialize() -> None:
         config.validate(settings)
         store = SessionStore()
         st.session_state.store = store
-        st.session_state.service = LLMService(store, settings)
+        st.session_state.service = GeminiService(store, settings)
         st.session_state.session_id = None
         st.session_state.report = ""
         st.session_state.title = ""
@@ -45,18 +45,18 @@ try:
     initialize()
 except Exception as exc:
     st.error(f"LLM 설정을 확인해주세요: {exc}")
-    st.info("프로젝트 폴더의 .env 파일에 LLM_PROVIDER, LLM_MODEL, API 키를 설정한 뒤 앱을 다시 실행하세요.")
+    st.info("프로젝트 폴더의 .env 파일에 GEMINI_API_KEY와 GEMINI_MODEL을 설정한 뒤 앱을 다시 실행하세요.")
     st.stop()
 
 settings = st.session_state.service.settings
 
 st.title("TitleGen")
-st.caption(f"{settings.provider} · {settings.model}")
+st.caption(f"Gemini · {settings.model}")
 st.write("상품과 타겟을 분석하여 마케팅 제목을 단계별로 생성합니다.")
 
 with st.sidebar:
     st.subheader("연결 설정")
-    st.text(f"공급자: {settings.provider}")
+    st.text("공급자: Gemini")
     st.text(f"모델: {settings.model}")
     st.caption("API 키는 서버의 .env에서만 읽으며 화면에 표시하지 않습니다.")
     if st.button("처음부터 다시 시작", use_container_width=True):
@@ -84,8 +84,8 @@ if st.button("2. 타겟 분석 시작", type="primary", use_container_width=True
             st.session_state.title = ""
             st.session_state.differentiated = ""
             st.session_state.refined = ""
-        except LLMAPIError as exc:
-            st.error(f"LLM 호출에 실패했습니다: {exc}")
+        except GeminiAPIError as exc:
+            st.error(f"Gemini 호출에 실패했습니다: {exc}")
 
 if st.session_state.report:
     st.success("타겟 분석 완료")
@@ -96,8 +96,8 @@ if st.session_state.report:
         try:
             with st.spinner("제목을 생성하고 있습니다..."):
                 st.session_state.title = st.session_state.service.generate_title(st.session_state.session_id)
-        except LLMAPIError as exc:
-            st.error(f"LLM 호출에 실패했습니다: {exc}")
+        except GeminiAPIError as exc:
+            st.error(f"Gemini 호출에 실패했습니다: {exc}")
 
 if st.session_state.title:
     st.subheader("생성된 제목")
@@ -110,8 +110,8 @@ if st.session_state.title:
                 st.session_state.differentiated = st.session_state.service.differentiate(
                     st.session_state.session_id
                 )
-        except LLMAPIError as exc:
-            st.error(f"LLM 호출에 실패했습니다: {exc}")
+        except GeminiAPIError as exc:
+            st.error(f"Gemini 호출에 실패했습니다: {exc}")
 
 if st.session_state.differentiated:
     st.subheader("차별화된 제목")
@@ -134,8 +134,8 @@ if st.session_state.differentiated:
                 st.rerun()
             except LoopLimitError as exc:
                 st.warning(str(exc))
-            except LLMAPIError as exc:
-                st.error(f"LLM 호출에 실패했습니다: {exc}")
+            except GeminiAPIError as exc:
+                st.error(f"Gemini 호출에 실패했습니다: {exc}")
 
 if st.session_state.refined:
     st.subheader("최종 제목")

@@ -1,38 +1,23 @@
 from typing import Any, Protocol
 from urllib.parse import quote
 
-import anthropic
 import httpx
 
-from titlegene.config import LLMSettings, get_settings, validate
+from titlegene.config import GeminiSettings, get_settings, validate
 from titlegene.services.prompt_service import PromptService
 from titlegene.services.session_store import SessionStore
 
 
-class LLMAPIError(Exception):
-    """Configured LLM provider failed to return a response."""
+class GeminiAPIError(Exception):
+    """Gemini API did not return a usable response."""
 
 
-class LLMClient(Protocol):
+class GeminiClientProtocol(Protocol):
     def complete(self, messages: list[dict[str, Any]]) -> str: ...
 
 
-class AnthropicClient:
-    def __init__(self, settings: LLMSettings) -> None:
-        self.settings = settings
-        self.client = anthropic.Anthropic(api_key=settings.api_key)
-
-    def complete(self, messages: list[dict[str, Any]]) -> str:
-        response = self.client.messages.create(
-            model=self.settings.model,
-            max_tokens=self.settings.max_tokens,
-            messages=messages,
-        )
-        return response.content[0].text
-
-
 class GeminiClient:
-    def __init__(self, settings: LLMSettings) -> None:
+    def __init__(self, settings: GeminiSettings) -> None:
         self.settings = settings
         self.client = httpx.Client(timeout=60.0)
 
@@ -51,48 +36,32 @@ class GeminiClient:
         try:
             return response.json()["candidates"][0]["content"]["parts"][0]["text"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise LLMAPIError("Gemini 응답에 텍스트가 없습니다.") from exc
+            raise GeminiAPIError("Gemini 응답에 텍스트가 없습니다.") from exc
 
 
-class OpenAICompatibleClient:
-    def __init__(self, settings: LLMSettings) -> None:
-        self.settings = settings
-        self.client = httpx.Client(timeout=60.0)
+class GeminiService:
+    """Runs the title workflow with a server-side Gemini client."""
 
-    def complete(self, messages: list[dict[str, Any]]) -> str:
-        response = self.client.post(
-            f"{self.settings.base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {self.settings.api_key}"},
-            json={"model": self.settings.model, "max_tokens": self.settings.max_tokens, "messages": messages},
-        )
-        response.raise_for_status()
-        try:
-            return response.json()["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise LLMAPIError("OpenAI 호환 API 응답에 텍스트가 없습니다.") from exc
-
-
-def create_client(settings: LLMSettings) -> LLMClient:
-    clients = {"anthropic": AnthropicClient, "gemini": GeminiClient, "openai_compatible": OpenAICompatibleClient}
-    return clients[settings.provider](settings)
-
-
-class LLMService:
-    def __init__(self, session_store: SessionStore, settings: LLMSettings | None = None, client: LLMClient | None = None) -> None:
+    def __init__(
+        self,
+        session_store: SessionStore,
+        settings: GeminiSettings | None = None,
+        client: GeminiClientProtocol | None = None,
+    ) -> None:
         self._store = session_store
         self.settings = settings or get_settings()
         validate(self.settings)
-        self._client = client or create_client(self.settings)
+        self._client = client or GeminiClient(self.settings)
 
     def _call_api(self, session_id: str, user_message: str) -> str:
         history = list(self._store.get_history(session_id))
         history.append({"role": "user", "content": user_message})
         try:
             assistant_text = self._client.complete(history)
-        except LLMAPIError:
+        except GeminiAPIError:
             raise
         except Exception as exc:
-            raise LLMAPIError(str(exc)) from exc
+            raise GeminiAPIError(str(exc)) from exc
         history.append({"role": "assistant", "content": assistant_text})
         self._store.set_history(session_id, history)
         return assistant_text
